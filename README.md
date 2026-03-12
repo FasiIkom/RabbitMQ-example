@@ -272,3 +272,22 @@ curl -X POST "http://localhost:8080/task?type=VERY_HARD"
 > ![Response instan vs proses lama di worker](https://github.com/user-attachments/assets/f7002ba1-15ee-4af4-9221-a028f17fe794)
 
 Dengan ini, kita mendapatkan keuntungan yaitu server utama tidak terkena blocking dari request besar tersebut sehingga tetap dapat memproses request-request lainnya.
+
+## Asumsi & Keputusan Implementasi
+
+- **Tidak ada database** — task dan hasil proses tidak dipersist ke DB.
+  RabbitMQ sudah menyimpan message secara durable (`Persistent + durable queue`),
+  dan tujuan demo ini adalah menunjukkan mekanisme event-driven, bukan data persistence.
+
+- **Simulasi proses dengan sleep** — worker menggunakan `time.Sleep()` untuk
+  mensimulasikan durasi kerja. Asumsi: sleep merepresentasikan waktu yang dibutuhkan
+  actual task (image processing, file backup, dsb).
+
+- **Producer manual (tidak auto-publish)** — task hanya dikirim via HTTP API,
+  bukan otomatis. Ini memudahkan demonstrasi dan pengujian secara terkontrol.
+
+## Penggunaan Generative AI
+
+Pengerjaan tugas ini dibantu oleh **Claude (Anthropic)** melalui claude.ai.
+Penggunaan meliputi: debugging error build dan Docker networking, serta refactoring
+struktur project dari multi-module menjadi single module.
