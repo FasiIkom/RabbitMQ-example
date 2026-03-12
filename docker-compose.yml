@@ -1,0 +1,87 @@
+services:
+  # ─────────────────────────────────────────
+  # Message Broker
+  # ─────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"    # AMQP protocol port
+      - "15672:15672"  # Management UI → http://localhost:15672
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tasknet
+
+  # ─────────────────────────────────────────
+  # Producer — generates tasks + HTTP API
+  # ─────────────────────────────────────────
+  producer:
+    build:
+      context: .                      # root (single module)
+      dockerfile: producer/Dockerfile
+    container_name: producer
+    ports:
+      - "8080:8080"   # HTTP API → http://localhost:8080
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - tasknet
+    restart: on-failure
+
+  # ─────────────────────────────────────────
+  # Workers — competing consumers (3 instances)
+  # Each has a unique WORKER_ID for identification
+  # ─────────────────────────────────────────
+  worker-alpha:
+    build:
+      context: .                     # root (single module)
+      dockerfile: worker/Dockerfile
+    container_name: worker-alpha
+    environment:
+      WORKER_ID: "ALPHA"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - tasknet
+    restart: on-failure
+
+  worker-beta:
+    build:
+      context: .                     # root (single module)
+      dockerfile: worker/Dockerfile
+    container_name: worker-beta
+    environment:
+      WORKER_ID: "BETA"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - tasknet
+    restart: on-failure
+
+  worker-gamma:
+    build:
+      context: .                     # root (single module)
+      dockerfile: worker/Dockerfile
+    container_name: worker-gamma
+    environment:
+      WORKER_ID: "GAMMA"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - tasknet
+    restart: on-failure
+
+networks:
+  tasknet:
+    driver: bridge
