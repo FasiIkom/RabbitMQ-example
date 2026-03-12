@@ -1,10 +1,10 @@
-# 🐇 RabbitMQ Event-Driven Demo — Go
+# RabbitMQ Event-Driven Demo — Go
 
 Simulasi sistem **event-driven** dengan pola **Competing Consumers** menggunakan RabbitMQ dan Go.
 
 ---
 
-## 📐 Arsitektur
+## Arsitektur
 
 ```
 ┌─────────────────────┐     publish      ┌──────────────────┐     consume     ┌──────────────────┐
@@ -24,7 +24,7 @@ RabbitMQ mendistribusikan task secara merata berdasarkan ketersediaan worker (Qo
 
 ---
 
-## 🗂 Struktur Project
+## Struktur Project
 
 ```
 rabbitmq-demo/
@@ -46,7 +46,7 @@ rabbitmq-demo/
 
 ---
 
-## 🚀 Cara Menjalankan
+## Cara Menjalankan
 
 ### Prerequisites
 - Docker Desktop terinstall dan running
@@ -116,7 +116,7 @@ docker compose down
 
 ---
 
-## 📋 Task Types
+## Task Types
 
 | Type | Durasi Proses | Keterangan |
 |---|---|---|
@@ -129,7 +129,7 @@ Semakin berat task, semakin lama worker memprosesnya — berguna untuk mengamati
 
 ---
 
-## 🔍 Cara Membaca Logs
+## Cara Membaca Logs
 
 ### Producer log:
 ```
@@ -150,7 +150,7 @@ BETA bisa selesai lebih cepat dan langsung ambil task berikutnya karena dapat EA
 
 ---
 
-## 🧠 Mekanisme Kunci
+## Mekanisme Kunci
 
 ### 1. Durable Queue + Persistent Messages
 ```go
@@ -185,7 +185,7 @@ Ini mencegah worker cepat "memborong" semua task — worker yang sedang sibuk ti
 
 ---
 
-## ⚖️ Asynchronous vs Request–Response
+## Asynchronous vs Request–Response
 
 | Aspek | Request–Response (HTTP biasa) | Asynchronous (RabbitMQ) |
 |---|---|---|
@@ -199,40 +199,76 @@ Ini mencegah worker cepat "memborong" semua task — worker yang sedang sibuk ti
 
 ---
 
-## 💡 Eksperimen yang Bisa Dicoba
+## Demonstrasi & Pengujian
 
-### A. Lihat queue menumpuk lalu terkuras
+### 1. Bagaimana Event Dikirim
+
+Event dikirim melalui HTTP API producer. Ketika `POST /task` dipanggil, producer membuat struct `Task`, men-serialize ke JSON, lalu mempublish ke `task_queue` di RabbitMQ menggunakan protokol AMQP. Producer **tidak menunggu** task selesai diproses — response HTTP langsung dikembalikan begitu message berhasil masuk queue.
+
 ```bash
-# Stop semua worker
+curl -X POST "http://localhost:8080/task?type=HARD"
+```
+
+> ![Kirim task via curl atau Scalar](https://github.com/user-attachments/assets/89eaeb90-0a61-4b04-ad23-2af5783486d0)
+
+---
+
+### 2. Bagaimana Event Diproses Consumer Secara Real-time
+
+Begitu worker aktif, RabbitMQ langsung mendistribusikan message ke worker yang available. Setiap worker hanya memproses satu task dalam satu waktu (QoS prefetch=1). Setelah selesai, worker mengirim ACK dan langsung mengambil task berikutnya dari queue.
+
+```bash
+docker compose logs -f worker-alpha worker-beta worker-gamma
+```
+
+> ![Worker memproses task secara real-time](https://github.com/user-attachments/assets/626e2b60-e99f-422d-b520-e837e1842993)
+
+---
+
+### 3. Bagaimana Event Disimpan di Queue
+
+Message disimpan secara persisten di `task_queue`. Dengan `DeliveryMode: Persistent` dan queue yang dideklarasikan sebagai `durable`, message tidak akan hilang meskipun RabbitMQ di-restart. Hal ini dapat diamati di RabbitMQ Management UI ketika worker di-stop — message akan menumpuk di queue dalam status **Ready**.
+
+```bash
+# Stop semua worker, kirim beberapa task, lalu lihat di Management UI
 docker compose stop worker-alpha worker-beta worker-gamma
+curl -X POST "http://localhost:8080/task/batch?count=10"
+```
+> ![Mematikan worker](https://github.com/user-attachments/assets/4be82cac-e613-4b8d-b2ff-6acc1237bc97)
+> ![Queue menumpuk saat worker di-stop](https://github.com/user-attachments/assets/6a795445-ce7f-4062-9089-93db05fdc4b9)
 
-# Kirim 30 task
-curl -X POST "http://localhost:8080/task/batch?count=30"
+---
 
-# Lihat di http://localhost:15672 → queue menumpuk (Ready: 30)
-# Start balik worker, lihat queue langsung terkuras
-docker compose start worker-alpha worker-beta worker-gamma
+### 4. Pengujian — Kirim Beberapa Event Sekaligus
+
+Mengirim 20 task sekaligus menggunakan batch endpoint untuk mengamati distribusi beban ke ketiga worker.
+
+```bash
+curl -X POST "http://localhost:8080/task/batch?count=20"
 ```
 
-### B. Buktikan asynchronous — response instan meski task lama
+> log distribusi task ke ALPHA, BETA, dan GAMMA_
+>
+> ![Distribusi task ke semua worker](https://github.com/user-attachments/assets/805fee0d-0955-405b-83ab-b0a18834848d)
+
+> RabbitMQ Management UI menampilkan message rate dan consumer count_
+>
+> ![RabbitMQ dashboard saat batch task dikirim](https://github.com/user-attachments/assets/805fee0d-0955-405b-83ab-b0a18834848d)
+
+---
+
+### 5. Pengujian — Buktikan Komunikasi Asynchronous
+
+Bukti paling konkret bahwa sistem bersifat asynchronous: mengirim `VERY_HARD` task yang butuh 30–60 detik untuk diproses, namun HTTP response dikembalikan dalam hitungan milidetik.
+
 ```bash
-# VERY_HARD task butuh 7-12 detik untuk diproses
-# Tapi HTTP response balik dalam <1ms
 curl -X POST "http://localhost:8080/task?type=VERY_HARD"
+# Response balik <1ms, padahal task baru selesai diproses 30-60 detik kemudian
 ```
 
-### C. Matikan satu worker saat ada task
-```bash
-docker compose stop worker-beta
-# Task yang tadinya giliran BETA akan diambil ALPHA atau GAMMA
-```
+> response time HTTP vs waktu proses worker di log_
+>
+> ![Response instan vs proses lama di worker](https://github.com/user-attachments/assets/a9197383-42a9-47df-973d-a756432009ac)
+> ![Response instan vs proses lama di worker](https://github.com/user-attachments/assets/f7002ba1-15ee-4af4-9221-a028f17fe794)
 
-### D. Test durability — restart RabbitMQ
-```bash
-docker compose restart rabbitmq
-# Message yang belum diproses tidak hilang!
-```
-
-### E. Lihat efek QoS — tanpa fair dispatch
-Edit `worker/main.go`, ubah `ch.Qos(1, 0, false)` → `ch.Qos(0, 0, false)`,
-rebuild, dan lihat semua task diborong worker pertama yang connect.
+Dengan ini, kita mendapatkan keuntungan yaitu server utama tidak terkena blocking dari request besar tersebut sehingga tetap dapat memproses request-request lainnya.
